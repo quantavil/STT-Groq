@@ -1,83 +1,143 @@
-# Groq Whisper STT for KDE Wayland
+# Groq Whisper STT for Wayland
 
-A lightweight, toggle-based speech-to-text (STT) script for Linux (KDE Wayland) using the Groq API and Whisper. Automatically records audio, transcribes it via Groq's high-speed Whisper model, and copies the result directly to your clipboard.
+A lightweight, toggle-based speech-to-text (STT) script for Linux (KDE Wayland) using the Groq API and Whisper. Press a shortcut to start recording, press again to stop — your transcript lands in the clipboard instantly.
 
 ## Features
+
 - **Toggle Recording:** Press a shortcut to start, press again to stop and transcribe.
 - **Auto-Stop Fuse:** Automatically stops recording after a configurable duration (default: 60s).
-- **Clipboard Integration:** Transcripts are automatically copied to the system clipboard (`wl-copy`).
-- **Desktop Notifications:** Provides visual feedback on recording, transcribing, and completion.
-- **High Speed:** Leverages Groq's fast inference for near-instant transcriptions.
+- **Opus Compression:** Compresses audio before upload (~1.9 MB WAV → ~100 KB Opus) for faster transcription.
+- **Clipboard Integration:** Transcripts are automatically copied to the system clipboard via `wl-copy`.
+- **Desktop Notifications:** Visual feedback at every stage — recording, transcribing, copied.
+- **High Speed:** Groq's fast inference + Opus compression = near-instant results.
+- **Clean Process Hygiene:** Fuse timers are killed on manual stop, lockfile prevents race conditions during transcription.
 
 ## Prerequisites
 
-Ensure you have the following dependencies installed:
+### Dependencies
 
 ```bash
-# Arch Linux (CachyOS)
-sudo pacman -S pipewire-audio curl jq wl-clipboard libnotify
+# Arch Linux / CachyOS
+sudo pacman -S pipewire-audio curl jq wl-clipboard libnotify opus-tools
 ```
 
-Dependencies:
-- `pw-record`: Part of PipeWire for recording audio.
-- `curl`: For API requests.
-- `jq`: For parsing JSON responses.
-- `wl-copy`: For clipboard management on Wayland.
-- `notify-send`: For desktop notifications.
+| Package | Purpose |
+|---|---|
+| `pw-record` | PipeWire audio recording |
+| `curl` | API requests to Groq |
+| `jq` | JSON response parsing |
+| `wl-copy` | Wayland clipboard |
+| `notify-send` | Desktop notifications |
+| `opusenc` | WAV → Opus compression before upload |
+
+### Verify all dependencies
+
+```bash
+for cmd in pw-record curl jq wl-copy notify-send opusenc; do
+    command -v "$cmd" && echo "$cmd ✓" || echo "$cmd ✗ MISSING"
+done
+```
 
 ## Installation
 
-1. **Clone or Download the script:**
-   Save the `stt.sh` file to a convenient location, e.g., `~/stt.sh`.
+1. **Clone or download the script:**
+
+   ```bash
+   git clone https://github.com/quantavil/stt.git
+   cd stt
+   ```
+
+   Or save `stt.sh` directly to `~/stt.sh`.
 
 2. **Make it executable:**
+
    ```bash
    chmod +x ~/stt.sh
    ```
 
-3. **Configure your API Key:**
-   You can either export it as an environment variable or paste it directly into the script:
+3. **Configure your API key:**
 
-   **Option A: Environment Variable (Recommended)**
+   **Option A — Environment variable (recommended):**
+
+   Add to your `~/.bashrc` or `~/.zshrc`:
+
    ```bash
    export GROQ_API_KEY="gsk_your_actual_key_here"
    ```
 
-   **Option B: Edit stt.sh**
-   Open `stt.sh` and replace the placeholder:
+   **Option B — Edit the script directly:**
+
    ```bash
    API_KEY="${GROQ_API_KEY:-gsk_your_actual_key_here}"
    ```
 
 ## Usage
 
-### Terminal
-You can run the script manually to test:
-- **First Run:** Starts recording.
-- **Second Run:** Stops recording and transcribes.
+### Terminal (test first)
 
 ```bash
-~/stt.sh
+~/stt.sh        # 🎙 starts recording — speak something
+~/stt.sh        # ⏳ stops → compresses → transcribes → 📋 copied
 ```
 
-### KDE Keyboard Shortcut (Recommended)
-To use this as a global STT tool:
+You should see a **"📋 Copied to clipboard"** notification and a log line like:
 
-1. Open **System Settings** → **Shortcuts** → **Shortcuts**.
-2. Scroll to the bottom and click **Add Command**.
-3. In the Command field, enter the full path to the script: `/home/quantavil/stt.sh` (or your chosen path).
-4. Click the shortcut box and assign a key combo (e.g., `Alt + L`).
-5. Click **Apply**.
+```
+Compressed: 1.9M → 96K
+```
 
-Now you can press your shortcut to start/stop dictation anywhere!
+### KDE keyboard shortcut (recommended)
+
+1. **System Settings** → search **Shortcuts** → **Shortcuts**
+2. Scroll to bottom → **Add Command**
+3. Paste the full path: `/home/quantavil/stt.sh`
+4. Click the shortcut box → press your combo (e.g., `Alt + L`)
+5. **Apply**
+
+Now press the shortcut anywhere to dictate.
 
 ## Configuration
 
-You can customize the script behavior by editing the variables in the `stt.sh` file:
+Edit the variables at the top of `stt.sh`:
 
-- `MODEL`: The Whisper model to use (default: `whisper-large-v3-turbo`).
-- `LANGUAGE`: The target language for transcription (default: `en`).
-- `MAX_DURATION`: Maximum recording time in seconds before auto-stop (default: `60`).
+| Variable | Default | Description |
+|---|---|---|
+| `MODEL` | `whisper-large-v3-turbo` | Groq Whisper model |
+| `LANGUAGE` | `en` | Target language (forces English/romanized output) |
+| `MAX_DURATION` | `60` | Auto-stop recording after N seconds |
+
+## How It Works
+
+```
+1st press  →  pw-record starts  →  PID saved  →  fuse timer spawned
+2nd press  →  pw-record killed  →  fuse killed
+           →  WAV compressed to Opus via opusenc
+           →  Opus uploaded to Groq API
+           →  JSON validated  →  transcript parsed
+           →  wl-copy  →  notification  →  cleanup
+```
+
+### State files
+
+All state files live in `$XDG_RUNTIME_DIR` (typically `/run/user/1000/`):
+
+| File | Purpose |
+|---|---|
+| `groq_stt.pid` | Stores recorder PID + fuse PID |
+| `groq_stt.wav` | Raw recorded audio |
+| `groq_stt.opus` | Compressed audio (uploaded to API) |
+| `groq_stt.lock` | Prevents re-trigger during transcription |
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Script does nothing | `rm -f $XDG_RUNTIME_DIR/groq_stt.*` to clear stuck state |
+| `opusenc` not found | `sudo pacman -S opus-tools` |
+| Clipboard empty after shortcut | Ensure `WAYLAND_DISPLAY` is set — the script handles this automatically |
+| "API returned non-JSON" error | Groq is down or rate-limited — try again in a few seconds |
+| Notification but no clipboard paste | Some apps need `Ctrl+Shift+V` for plain text paste |
 
 ## License
+
 This project is licensed under the [MIT License](LICENSE).
