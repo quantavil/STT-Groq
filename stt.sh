@@ -45,7 +45,7 @@ if [[ -f "$PID_FILE" ]]; then
     rm -f "$PID_FILE"
 
     # Kill the fuse timer so it doesn't linger
-    [[ -n "${FUSE_PID:-}" ]] && kill "$FUSE_PID" 2>/dev/null
+    [[ -n "${FUSE_PID:-}" && "${FUSE_PID}" != "$$" ]] && kill "$FUSE_PID" 2>/dev/null
 
     # Stop the recorder
     if kill -0 "$REC_PID" 2>/dev/null; then
